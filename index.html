@@ -8,17 +8,1608 @@
   <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <link rel="stylesheet" href="styles.css">
+  <style>
+    body { 
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    .glass { 
+      backdrop-filter: blur(10px); 
+      background: rgba(255, 255, 255, 0.1); 
+    }
+
+    .slide-in {
+      animation: slideIn 0.3s ease-out;
+    }
+
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateY(20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .fade-in {
+      animation: fadeIn 0.5s ease-in;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    /* Scrollbar personalizado */
+    ::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.3);
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.5);
+    }
+
+    /* Loading spinner */
+    .spinner {
+      border: 3px solid rgba(255, 255, 255, 0.3);
+      border-radius: 50%;
+      border-top: 3px solid white;
+      width: 24px;
+      height: 24px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
 </head>
 <body>
   <div id="root"></div>
   
-  <script src="config.js"></script>
-  <script src="database.js"></script>
-  <script src="utils.js"></script>
-  <script src="auth.js"></script>
-  <script src="booking-logic.js"></script>
-  <script type="text/babel" src="components.js"></script>
-  <script type="text/babel" src="app.js"></script>
+  <script>
+    // ===== Configuración del sistema =====
+    const CONFIG = {
+      CAPACITY: 6,
+      TIMES: ["07:00", "09:00", "18:00"],
+      DAYS_AHEAD: 21,
+      MIN_HOURS_CANCEL: 24
+    };
+
+    // ===== Usuarios de prueba =====
+    const TEST_USERS = [
+      { 
+        id: "user1",
+        email: "usuario@prueba.com", 
+        name: "Cliente Demo", 
+        role: "user", 
+        sessions: 8,
+        phone: "+52 444 123 4567"
+      },
+      { 
+        id: "instructor1",
+        email: "instructor@prueba.com", 
+        name: "Instructor Demo", 
+        role: "instructor", 
+        sessions: 0,
+        phone: "+52 444 765 4321"
+      },
+      { 
+        id: "admin1",
+        email: "admin@prueba.com", 
+        name: "Admin Demo", 
+        role: "admin", 
+        sessions: 0,
+        phone: "+52 444 999 0000"
+      }
+    ];
+
+    // ===== Textos del sistema =====
+    const TEXTS = {
+      LOGIN: {
+        TITLE: "Pilates Studio",
+        SUBTITLE: "Sistema de Reservas y Asistencia",
+        EMAIL_PLACEHOLDER: "tu@correo.com",
+        LOGIN_BUTTON: "Iniciar Sesión",
+        DEMO_TOGGLE: "Ver usuarios de prueba"
+      },
+      ROLES: {
+        admin: "Administrador",
+        instructor: "Instructor", 
+        user: "Cliente"
+      },
+      STATUS: {
+        booked: "Reservado",
+        attended: "Asistió",
+        missed: "Faltó",
+        canceled: "Cancelado"
+      },
+      ERRORS: {
+        INVALID_EMAIL: "Correo electrónico inválido",
+        USER_NOT_FOUND: "Usuario no encontrado",
+        ALREADY_BOOKED: "Ya reservaste ese horario",
+        CLASS_FULL: "Clase llena (6/6)",
+        NO_SESSIONS: "No tienes sesiones disponibles",
+        BOOKING_NOT_FOUND: "Reserva no encontrada",
+        CANNOT_CHANGE: "Solo puedes reprogramar con ≥24 h de anticipación",
+        INVALID_STATUS: "Estado inválido"
+      }
+    };
+
+    // ===== Utilidades de fecha y formato =====
+    const Utils = {
+      pad: (n) => n.toString().padStart(2, "0"),
+      
+      localISO: (date) => {
+        const d = new Date(date);
+        return `${d.getFullYear()}-${Utils.pad(d.getMonth()+1)}-${Utils.pad(d.getDate())}T${Utils.pad(d.getHours())}:${Utils.pad(d.getMinutes())}`;
+      },
+      
+      parseLocalISO: (iso) => {
+        const [datePart, timePart] = iso.split("T");
+        const [year, month, day] = datePart.split("-").map(Number);
+        const [hour, minute] = timePart.split(":").map(Number);
+        return new Date(year, month-1, day, hour, minute);
+      },
+      
+      addDays: (baseDate, days) => {
+        const date = new Date(baseDate);
+        date.setDate(date.getDate() + days);
+        return date;
+      },
+      
+      formatDate: (date) => {
+        return date.toLocaleString('es-ES', {
+          weekday: "short", 
+          year: "numeric", 
+          month: "short", 
+          day: "numeric", 
+          hour: "2-digit", 
+          minute: "2-digit"
+        });
+      },
+      
+      dayKey: (date) => {
+        return date.toISOString().slice(0, 10);
+      },
+      
+      generateId: () => {
+        return Math.random().toString(36).slice(2) + Date.now().toString(36);
+      },
+      
+      isValidEmail: (email) => {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        return emailRegex.test(email);
+      },
+      
+      generateSlots: () => {
+        const slots = [];
+        const now = new Date();
+        
+        for (let i = 0; i < CONFIG.DAYS_AHEAD; i++) {
+          const date = Utils.addDays(now, i);
+          
+          for (const time of CONFIG.TIMES) {
+            const [hour, minute] = time.split(":").map(Number);
+            const slotDate = new Date(date.getFullYear(), date.getMonth(), date.getDate(), hour, minute);
+            
+            if (slotDate > now) {
+              slots.push(Utils.localISO(slotDate));
+            }
+          }
+        }
+        
+        return slots;
+      },
+      
+      getCapacity: (slotISO, bookings) => {
+        return bookings.filter(booking => 
+          booking.slotISO === slotISO && booking.status !== "canceled"
+        ).length;
+      },
+      
+      canChangeBooking: (booking) => {
+        const slotDate = Utils.parseLocalISO(booking.slotISO);
+        const now = new Date();
+        const hoursUntilSlot = (slotDate - now) / (1000 * 60 * 60);
+        return hoursUntilSlot >= CONFIG.MIN_HOURS_CANCEL;
+      },
+      
+      groupSlotsByDay: (slots) => {
+        const grouped = {};
+        
+        for (const slot of slots) {
+          const date = Utils.parseLocalISO(slot);
+          const key = Utils.dayKey(date);
+          
+          if (!grouped[key]) {
+            grouped[key] = [];
+          }
+          grouped[key].push(slot);
+        }
+        
+        return grouped;
+      },
+      
+      formatLongDate: (dateString) => {
+        const date = new Date(dateString);
+        return date.toLocaleDateString('es-ES', {
+          weekday: 'long', 
+          year: 'numeric', 
+          month: 'long', 
+          day: 'numeric'
+        });
+      },
+      
+      formatTime: (isoString) => {
+        const date = Utils.parseLocalISO(isoString);
+        return date.toLocaleTimeString('es-ES', {
+          hour: '2-digit', 
+          minute: '2-digit'
+        });
+      }
+    };
+
+    // ===== Simulación de base de datos =====
+    const Database = {
+      getUsers: () => {
+        try {
+          const stored = window.localStorage?.getItem("pilates_users");
+          if (!stored || JSON.parse(stored).length === 0) {
+            Database.saveUsers(TEST_USERS);
+            return TEST_USERS;
+          }
+          return JSON.parse(stored);
+        } catch (error) {
+          console.error("Error al cargar usuarios:", error);
+          return TEST_USERS;
+        }
+      },
+      
+      saveUsers: (users) => {
+        try {
+          if (window.localStorage) {
+            window.localStorage.setItem("pilates_users", JSON.stringify(users));
+          }
+        } catch (error) {
+          console.error("Error al guardar usuarios:", error);
+        }
+      },
+      
+      getUserByEmail: (email) => {
+        const users = Database.getUsers();
+        return users.find(user => user.email.toLowerCase() === email.toLowerCase());
+      },
+      
+      updateUser: (updatedUser) => {
+        const users = Database.getUsers();
+        const index = users.findIndex(user => user.email === updatedUser.email);
+        if (index !== -1) {
+          users[index] = { ...users[index], ...updatedUser };
+          Database.saveUsers(users);
+          return users[index];
+        }
+        return null;
+      },
+      
+      getBookings: () => {
+        try {
+          const stored = window.localStorage?.getItem("pilates_bookings");
+          return stored ? JSON.parse(stored) : [];
+        } catch (error) {
+          console.error("Error al cargar reservas:", error);
+          return [];
+        }
+      },
+      
+      saveBookings: (bookings) => {
+        try {
+          if (window.localStorage) {
+            window.localStorage.setItem("pilates_bookings", JSON.stringify(bookings));
+          }
+        } catch (error) {
+          console.error("Error al guardar reservas:", error);
+        }
+      },
+      
+      addBooking: (booking) => {
+        const bookings = Database.getBookings();
+        const newBooking = {
+          id: Utils.generateId(),
+          ...booking,
+          createdAt: Utils.localISO(new Date())
+        };
+        bookings.push(newBooking);
+        Database.saveBookings(bookings);
+        return newBooking;
+      },
+      
+      updateBooking: (bookingId, updates) => {
+        const bookings = Database.getBookings();
+        const index = bookings.findIndex(booking => booking.id === bookingId);
+        if (index !== -1) {
+          bookings[index] = { ...bookings[index], ...updates };
+          Database.saveBookings(bookings);
+          return bookings[index];
+        }
+        return null;
+      },
+      
+      getCurrentUser: () => {
+        try {
+          const stored = window.localStorage?.getItem("pilates_current_user");
+          return stored ? JSON.parse(stored) : null;
+        } catch (error) {
+          console.error("Error al cargar usuario actual:", error);
+          return null;
+        }
+      },
+      
+      setCurrentUser: (user) => {
+        try {
+          if (window.localStorage) {
+            if (user) {
+              window.localStorage.setItem("pilates_current_user", JSON.stringify(user));
+            } else {
+              window.localStorage.removeItem("pilates_current_user");
+            }
+          }
+        } catch (error) {
+          console.error("Error al guardar usuario actual:", error);
+        }
+      },
+      
+      getFutureBookings: () => {
+        const bookings = Database.getBookings();
+        const now = new Date();
+        return bookings.filter(booking => {
+          const slotDate = Utils.parseLocalISO(booking.slotISO);
+          return slotDate >= now && booking.status !== "canceled";
+        });
+      },
+      
+      getTodayBookings: () => {
+        const bookings = Database.getBookings();
+        const today = Utils.dayKey(new Date());
+        return bookings.filter(booking => {
+          const slotDate = Utils.parseLocalISO(booking.slotISO);
+          return Utils.dayKey(slotDate) === today && booking.status !== "canceled";
+        });
+      }
+    };
+
+    // ===== Sistema de autenticación =====
+    const Auth = {
+      validateLogin: (email, password = "") => {
+        if (!email || !Utils.isValidEmail(email)) {
+          throw new Error(TEXTS.ERRORS.INVALID_EMAIL);
+        }
+        
+        const user = Database.getUserByEmail(email.trim());
+        if (!user) {
+          throw new Error(TEXTS.ERRORS.USER_NOT_FOUND);
+        }
+        
+        return user;
+      },
+      
+      login: (email, password = "") => {
+        try {
+          const user = Auth.validateLogin(email, password);
+          Database.setCurrentUser(user);
+          return user;
+        } catch (error) {
+          console.error("Error en login:", error);
+          throw error;
+        }
+      },
+      
+      logout: () => {
+        try {
+          Database.setCurrentUser(null);
+        } catch (error) {
+          console.error("Error en logout:", error);
+        }
+      },
+      
+      getCurrentUser: () => {
+        try {
+          return Database.getCurrentUser();
+        } catch (error) {
+          console.error("Error al obtener usuario actual:", error);
+          return null;
+        }
+      },
+      
+      refreshCurrentUser: () => {
+        try {
+          const currentUser = Database.getCurrentUser();
+          if (currentUser) {
+            const updatedUser = Database.getUserByEmail(currentUser.email);
+            if (updatedUser) {
+              Database.setCurrentUser(updatedUser);
+              return updatedUser;
+            }
+          }
+          return null;
+        } catch (error) {
+          console.error("Error al refrescar usuario:", error);
+          return null;
+        }
+      }
+    };
+
+    // ===== Lógica de negocio para reservas =====
+    const BookingLogic = {
+      validateBooking: (user, slotISO) => {
+        if (!user) {
+          throw new Error(TEXTS.ERRORS.USER_NOT_FOUND);
+        }
+        
+        if (user.role === 'user' && user.sessions <= 0) {
+          throw new Error(TEXTS.ERRORS.NO_SESSIONS);
+        }
+        
+        const existingBookings = Database.getBookings();
+        const hasExistingBooking = existingBookings.some(booking => 
+          booking.userEmail === user.email && 
+          booking.slotISO === slotISO && 
+          booking.status !== "canceled"
+        );
+        
+        if (hasExistingBooking) {
+          throw new Error(TEXTS.ERRORS.ALREADY_BOOKED);
+        }
+        
+        const currentCapacity = Utils.getCapacity(slotISO, existingBookings);
+        if (currentCapacity >= CONFIG.CAPACITY) {
+          throw new Error(TEXTS.ERRORS.CLASS_FULL);
+        }
+        
+        return true;
+      },
+      
+      createBooking: (user, slotISO) => {
+        try {
+          BookingLogic.validateBooking(user, slotISO);
+          
+          const booking = Database.addBooking({
+            userEmail: user.email,
+            userName: user.name,
+            slotISO: slotISO,
+            status: "booked"
+          });
+          
+          if (user.role === 'user') {
+            const updatedUser = {
+              ...user,
+              sessions: user.sessions - 1
+            };
+            Database.updateUser(updatedUser);
+            Database.setCurrentUser(updatedUser);
+          }
+          
+          return booking;
+        } catch (error) {
+          console.error("Error al crear reserva:", error);
+          throw error;
+        }
+      },
+      
+      cancelBooking: (bookingId, requestingUser) => {
+        try {
+          const bookings = Database.getBookings();
+          const booking = bookings.find(b => b.id === bookingId);
+          
+          if (!booking) {
+            throw new Error(TEXTS.ERRORS.BOOKING_NOT_FOUND);
+          }
+          
+          if (booking.status === "canceled") {
+            return booking;
+          }
+          
+          const isOwnBooking = booking.userEmail === requestingUser.email;
+          const isAdmin = requestingUser.role === 'admin';
+          
+          if (!isOwnBooking && !isAdmin) {
+            throw new Error("No tienes permisos para cancelar esta reserva");
+          }
+          
+          const canRefund = Utils.canChangeBooking(booking) || isAdmin;
+          
+          const updatedBooking = Database.updateBooking(bookingId, {
+            status: "canceled",
+            canceledAt: Utils.localISO(new Date()),
+            canceledBy: requestingUser.email
+          });
+          
+          if (canRefund) {
+            const user = Database.getUserByEmail(booking.userEmail);
+            if (user && user.role === 'user') {
+              const updatedUser = {
+                ...user,
+                sessions: user.sessions + 1
+              };
+              Database.updateUser(updatedUser);
+              
+              if (user.email === requestingUser.email) {
+                Database.setCurrentUser(updatedUser);
+              }
+            }
+          }
+          
+          return updatedBooking;
+        } catch (error) {
+          console.error("Error al cancelar reserva:", error);
+          throw error;
+        }
+      },
+      
+      rescheduleBooking: (bookingId, newSlotISO, requestingUser) => {
+        try {
+          const bookings = Database.getBookings();
+          const booking = bookings.find(b => b.id === bookingId);
+          
+          if (!booking) {
+            throw new Error(TEXTS.ERRORS.BOOKING_NOT_FOUND);
+          }
+          
+          const isOwnBooking = booking.userEmail === requestingUser.email;
+          const isAdmin = requestingUser.role === 'admin';
+          
+          if (!isOwnBooking && !isAdmin) {
+            throw new Error("No tienes permisos para reprogramar esta reserva");
+          }
+          
+          if (!isAdmin && !Utils.canChangeBooking(booking)) {
+            throw new Error(TEXTS.ERRORS.CANNOT_CHANGE);
+          }
+          
+          const newSlotCapacity = Utils.getCapacity(newSlotISO, bookings);
+          if (newSlotCapacity >= CONFIG.CAPACITY) {
+            throw new Error("La nueva clase está llena");
+          }
+          
+          const hasConflict = bookings.some(b => 
+            b.userEmail === booking.userEmail && 
+            b.slotISO === newSlotISO && 
+            b.status !== "canceled" && 
+            b.id !== bookingId
+          );
+          
+          if (hasConflict) {
+            throw new Error("Ya tienes una reserva en ese horario");
+          }
+          
+          const updatedBooking = Database.updateBooking(bookingId, {
+            slotISO: newSlotISO,
+            rescheduledAt: Utils.localISO(new Date()),
+            rescheduledBy: requestingUser.email
+          });
+          
+          return updatedBooking;
+        } catch (error) {
+          console.error("Error al reprogramar reserva:", error);
+          throw error;
+        }
+      },
+      
+      markAttendance: (bookingId, status, requestingUser) => {
+        try {
+          if (!["booked", "attended", "missed"].includes(status)) {
+            throw new Error(TEXTS.ERRORS.INVALID_STATUS);
+          }
+          
+          const updatedBooking = Database.updateBooking(bookingId, {
+            status: status,
+            attendanceMarkedAt: Utils.localISO(new Date()),
+            attendanceMarkedBy: requestingUser.email
+          });
+          
+          if (!updatedBooking) {
+            throw new Error(TEXTS.ERRORS.BOOKING_NOT_FOUND);
+          }
+          
+          return updatedBooking;
+        } catch (error) {
+          console.error("Error al marcar asistencia:", error);
+          throw error;
+        }
+      },
+      
+      addSessions: (userEmail, amount, requestingUser) => {
+        try {
+          const user = Database.getUserByEmail(userEmail);
+          if (!user) {
+            throw new Error(TEXTS.ERRORS.USER_NOT_FOUND);
+          }
+          
+          const updatedUser = {
+            ...user,
+            sessions: Math.max(0, (user.sessions || 0) + Number(amount))
+          };
+          
+          Database.updateUser(updatedUser);
+          return updatedUser;
+        } catch (error) {
+          console.error("Error al agregar sesiones:", error);
+          throw error;
+        }
+      },
+      
+      setSessions: (userEmail, totalAmount, requestingUser) => {
+        try {
+          const user = Database.getUserByEmail(userEmail);
+          if (!user) {
+            throw new Error(TEXTS.ERRORS.USER_NOT_FOUND);
+          }
+          
+          const updatedUser = {
+            ...user,
+            sessions: Math.max(0, Number(totalAmount))
+          };
+          
+          Database.updateUser(updatedUser);
+          return updatedUser;
+        } catch (error) {
+          console.error("Error al establecer sesiones:", error);
+          throw error;
+        }
+      },
+      
+      getUserBookings: (userEmail) => {
+        const bookings = Database.getBookings();
+        return bookings.filter(booking => 
+          booking.userEmail === userEmail && booking.status !== "canceled"
+        );
+      },
+      
+      getTodayClasses: () => {
+        return Database.getTodayBookings();
+      }
+    };
+  </script>
+
+  <script type="text/babel">
+    const { useState, useEffect, useMemo } = React;
+
+    // ===== Hook personalizado para autenticación =====
+    function useAuth() {
+      const [user, setUser] = useState(null);
+      const [loading, setLoading] = useState(true);
+      
+      useEffect(() => {
+        const currentUser = Auth.getCurrentUser();
+        setUser(currentUser);
+        setLoading(false);
+      }, []);
+
+      const login = async (email, password = "") => {
+        try {
+          const loggedInUser = Auth.login(email, password);
+          setUser(loggedInUser);
+          return loggedInUser;
+        } catch (error) {
+          console.error("Error en login:", error);
+          throw error;
+        }
+      };
+
+      const logout = () => {
+        Auth.logout();
+        setUser(null);
+      };
+
+      const refreshUser = () => {
+        const updatedUser = Auth.refreshCurrentUser();
+        setUser(updatedUser);
+        return updatedUser;
+      };
+
+      return { user, login, logout, refreshUser, loading };
+    }
+
+    // ===== Hook para gestión de datos =====
+    function useAppData() {
+      const [bookings, setBookings] = useState([]);
+      const [users, setUsers] = useState([]);
+      const [slots, setSlots] = useState([]);
+      
+      const refreshData = () => {
+        setBookings(Database.getBookings());
+        setUsers(Database.getUsers());
+        setSlots(Utils.generateSlots());
+      };
+
+      useEffect(() => {
+        refreshData();
+      }, []);
+
+      return { bookings, users, slots, refreshData };
+    }
+
+    // ===== Componentes UI Básicos =====
+    const Badge = ({ children, variant = "default", className = "" }) => {
+      const variants = {
+        default: "bg-gray-100 text-gray-800 border-gray-200",
+        success: "bg-green-100 text-green-800 border-green-200",
+        warning: "bg-yellow-100 text-yellow-800 border-yellow-200",
+        danger: "bg-red-100 text-red-800 border-red-200",
+        info: "bg-blue-100 text-blue-800 border-blue-200"
+      };
+      
+      return (
+        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${variants[variant]} ${className}`}>
+          {children}
+        </span>
+      );
+    };
+
+    const Section = ({ title, children, rightContent, className = "" }) => (
+      <div className={`rounded-2xl shadow-lg p-6 bg-white border border-white/20 slide-in ${className}`}>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-semibold text-gray-800">{title}</h2>
+          {rightContent}
+        </div>
+        {children}
+      </div>
+    );
+
+    const LoadingSpinner = ({ size = "default" }) => {
+      const sizes = {
+        small: "w-4 h-4",
+        default: "w-6 h-6", 
+        large: "w-8 h-8"
+      };
+      
+      return <div className={`spinner ${sizes[size]}`}></div>;
+    };
+
+    const Button = ({ 
+      children, 
+      onClick, 
+      variant = "primary", 
+      size = "default", 
+      disabled = false, 
+      loading = false,
+      className = "" 
+    }) => {
+      const variants = {
+        primary: "bg-blue-600 text-white hover:bg-blue-700",
+        secondary: "bg-gray-600 text-white hover:bg-gray-700",
+        success: "bg-green-600 text-white hover:bg-green-700",
+        danger: "bg-red-600 text-white hover:bg-red-700",
+        outline: "border border-gray-300 text-gray-700 hover:bg-gray-50"
+      };
+      
+      const sizes = {
+        small: "px-3 py-1 text-sm",
+        default: "px-4 py-2",
+        large: "px-6 py-3 text-lg"
+      };
+      
+      return (
+        <button
+          onClick={onClick}
+          disabled={disabled || loading}
+          className={`
+            rounded-lg font-medium transition-all duration-200 
+            ${variants[variant]} ${sizes[size]} ${className}
+            ${disabled || loading ? 'opacity-50 cursor-not-allowed' : 'transform hover:scale-105'}
+          `}
+        >
+          {loading && <LoadingSpinner size="small" />}
+          {!loading && children}
+        </button>
+      );
+    };
+
+    // ===== Página de Login =====
+    const LoginPage = ({ onLogin }) => {
+      const [email, setEmail] = useState("");
+      const [showDemo, setShowDemo] = useState(false);
+      const [isLoading, setIsLoading] = useState(false);
+
+      const handleLogin = async () => {
+        setIsLoading(true);
+        try {
+          await onLogin(email);
+        } catch (error) {
+          alert(error.message);
+        } finally {
+          setIsLoading(false);
+        }
+      };
+
+      const handleKeyPress = (e) => {
+        if (e.key === 'Enter') {
+          handleLogin();
+        }
+      };
+
+      return (
+        <div className="min-h-screen flex items-center justify-center p-4 fade-in">
+          <div className="w-full max-w-md">
+            <div className="glass rounded-3xl p-8 shadow-2xl border border-white/20">
+              <div className="text-center mb-8">
+                <div className="w-16 h-16 bg-white/20 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                  <span className="text-2xl">🧘‍♀️</span>
+                </div>
+                <h1 className="text-2xl font-bold text-white mb-2">{TEXTS.LOGIN.TITLE}</h1>
+                <p className="text-white/80 text-sm">{TEXTS.LOGIN.SUBTITLE}</p>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-white/90 text-sm font-medium mb-2">
+                    Correo electrónico
+                  </label>
+                  <input
+                    type="email"
+                    className="w-full px-4 py-3 rounded-xl border border-white/20 bg-white/10 text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-white/30 transition-all"
+                    placeholder={TEXTS.LOGIN.EMAIL_PLACEHOLDER}
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    onKeyPress={handleKeyPress}
+                    disabled={isLoading}
+                  />
+                </div>
+
+                <Button
+                  onClick={handleLogin}
+                  loading={isLoading}
+                  className="w-full bg-white text-gray-800 font-semibold hover:bg-white/90"
+                >
+                  {TEXTS.LOGIN.LOGIN_BUTTON}
+                </Button>
+
+                <div className="text-center">
+                  <button
+                    className="text-white/80 text-sm hover:text-white transition-colors"
+                    onClick={() => setShowDemo(!showDemo)}
+                    disabled={isLoading}
+                  >
+                    {showDemo ? "Ocultar" : "Ver"} usuarios de prueba
+                  </button>
+                </div>
+
+                {showDemo && (
+                  <div className="bg-white/10 rounded-xl p-4 space-y-3 slide-in">
+                    <p className="text-white/90 text-sm font-medium mb-3">Usuarios de prueba:</p>
+                    {TEST_USERS.map(user => (
+                      <div key={user.email} className="flex items-center justify-between">
+                        <div>
+                          <div className="text-white text-sm font-medium">{user.name}</div>
+                          <div className="text-white/70 text-xs">{user.email}</div>
+                          <Badge variant={
+                            user.role === 'admin' ? 'danger' : 
+                            user.role === 'instructor' ? 'warning' : 'info'
+                          }>
+                            {TEXTS.ROLES[user.role]}
+                          </Badge>
+                        </div>
+                        <button
+                          className="text-xs bg-white/20 text-white px-3 py-1 rounded-lg hover:bg-white/30 transition-colors disabled:opacity-50"
+                          onClick={() => setEmail(user.email)}
+                          disabled={isLoading}
+                        >
+                          Usar
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // ===== Grid de Horarios Disponibles =====
+    const SlotsGrid = ({ slots, bookings, onBook, currentUser }) => {
+      const grouped = useMemo(() => {
+        return Utils.groupSlotsByDay(slots);
+      }, [slots]);
+
+      const SlotCard = ({ slotISO }) => {
+        const capacity = Utils.getCapacity(slotISO, bookings);
+        const userHasBooking = bookings.some(b => 
+          b.userEmail === currentUser?.email && 
+          b.slotISO === slotISO && 
+          b.status !== "canceled"
+        );
+        const isFull = capacity >= CONFIG.CAPACITY;
+        const canBook = currentUser?.role === 'user' && !userHasBooking && !isFull && currentUser.sessions > 0;
+
+        return (
+          <div className={`rounded-xl border-2 p-4 transition-all duration-200 ${
+            userHasBooking ? 'bg-blue-50 border-blue-200' : 
+            isFull ? 'bg-gray-50 border-gray-200' : 
+            'bg-white border-gray-200 hover:border-blue-300 hover:shadow-md'
+          }`}>
+            <div className="flex items-center justify-between mb-3">
+              <div className="font-semibold text-gray-800">
+                {Utils.formatTime(slotISO)}
+              </div>
+              <Badge variant={isFull ? "danger" : capacity > 3 ? "warning" : "success"}>
+                {capacity}/{CONFIG.CAPACITY}
+              </Badge>
+            </div>
+            
+            <Button
+              onClick={() => onBook(slotISO)}
+              disabled={!canBook}
+              variant={userHasBooking ? "success" : isFull ? "outline" : "primary"}
+              size="small"
+              className="w-full"
+            >
+              {userHasBooking ? "✓ Reservado" : 
+               isFull ? "Clase llena" : 
+               !currentUser ? "Inicia sesión" :
+               currentUser.role !== 'user' ? "Solo clientes" :
+               currentUser.sessions <= 0 ? "Sin sesiones" :
+               "Reservar"}
+            </Button>
+          </div>
+        );
+      };
+
+      return (
+        <div className="space-y-6">
+          {Object.entries(grouped).map(([dayKey, daySlots]) => (
+            <div key={dayKey} className="slide-in">
+              <div className="text-sm font-medium text-gray-600 mb-3">
+                {Utils.formatLongDate(dayKey)}
+              </div>
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {daySlots.map(slot => (
+                  <SlotCard key={slot} slotISO={slot} />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    };
+
+    // ===== Lista de Reservas del Usuario =====
+    const BookingsList = ({ user, bookings, allSlots, onCancel, onReschedule }) => {
+      const userBookings = useMemo(() => {
+        return BookingLogic.getUserBookings(user?.email)
+          .sort((a, b) => Utils.parseLocalISO(a.slotISO) - Utils.parseLocalISO(b.slotISO));
+      }, [user, bookings]);
+
+      if (userBookings.length === 0) {
+        return (
+          <div className="text-center py-12 text-gray-500">
+            <span className="text-4xl mb-4 block">📅</span>
+            <h3 className="text-lg font-medium mb-2">No tienes reservas activas</h3>
+            <p className="text-sm">Reserva tu primera clase en el calendario</p>
+          </div>
+        );
+      }
+
+      const BookingCard = ({ booking }) => {
+        const slotDate = Utils.parseLocalISO(booking.slotISO);
+        const canEdit = Utils.canChangeBooking(booking);
+        const statusColors = {
+          booked: "info",
+          attended: "success", 
+          missed: "danger"
+        };
+
+        return (
+          <div className="border-2 border-gray-200 rounded-xl p-4 hover:shadow-md transition-all duration-200 slide-in">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="space-y-2">
+                <div className="font-semibold text-gray-800">
+                  {Utils.formatDate(slotDate)}
+                </div>
+                <Badge variant={statusColors[booking.status] || "default"}>
+                  {TEXTS.STATUS[booking.status] || booking.status}
+                </Badge>
+              </div>
+              
+              <div className="flex flex-wrap items-center gap-2">
+                {canEdit && (
+                  <select
+                    className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    defaultValue=""
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        onReschedule(booking, e.target.value);
+                      }
+                    }}
+                  >
+                    <option value="">Reprogramar a…</option>
+                    {allSlots.map(slot => (
+                      <option key={slot} value={slot}>
+                        {Utils.formatDate(Utils.parseLocalISO(slot))}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                
+                <Button
+                  onClick={() => onCancel(booking)}
+                  variant="danger"
+                  size="small"
+                >
+                  Cancelar {canEdit ? "(regresa sesión)" : "(sin reembolso)"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        );
+      };
+
+      return (
+        <div className="space-y-4">
+          {userBookings.map(booking => (
+            <BookingCard key={booking.id} booking={booking} />
+          ))}
+        </div>
+      );
+    };
+
+    // ===== Panel del Instructor =====
+    const InstructorPanel = ({ bookings, users, onRefresh }) => {
+      const todayClasses = useMemo(() => {
+        return BookingLogic.getTodayClasses();
+      }, [bookings]);
+
+      const upcomingBookings = useMemo(() => {
+        const future = Database.getFutureBookings();
+        return future
+          .slice(0, 10)
+          .map(booking => ({
+            ...booking,
+            user: users.find(u => u.email === booking.userEmail)
+          }));
+      }, [bookings, users]);
+
+      const handleMarkAttendance = async (bookingId, status) => {
+        try {
+          const currentUser = Auth.getCurrentUser();
+          await BookingLogic.markAttendance(bookingId, status, currentUser);
+          onRefresh();
+        } catch (error) {
+          alert(error.message);
+        }
+      };
+
+      const AttendanceCard = ({ booking }) => (
+        <div className="border rounded-xl p-4 flex items-center justify-between">
+          <div>
+            <div className="font-medium">{Utils.formatDate(Utils.parseLocalISO(booking.slotISO))}</div>
+            <div className="text-sm text-gray-600">{booking.user?.name || booking.userEmail}</div>
+            <Badge variant={
+              booking.status === "attended" ? "success" : 
+              booking.status === "missed" ? "danger" : "info"
+            }>
+              {TEXTS.STATUS[booking.status]}
+            </Badge>
+          </div>
+          
+          {booking.status === "booked" && (
+            <div className="flex gap-2">
+              <Button
+                onClick={() => handleMarkAttendance(booking.id, "attended")}
+                variant="success"
+                size="small"
+              >
+                ✓ Asistió
+              </Button>
+              <Button
+                onClick={() => handleMarkAttendance(booking.id, "missed")}
+                variant="danger"
+                size="small"
+              >
+                ✗ Faltó
+              </Button>
+            </div>
+          )}
+        </div>
+      );
+
+      return (
+        <div className="space-y-6">
+          <Section 
+            title="Clases de hoy" 
+            rightContent={<Badge variant="info">{todayClasses.length} reservas</Badge>}
+          >
+            <div className="space-y-3">
+              {todayClasses.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">
+                  <span className="text-3xl mb-2 block">☀️</span>
+                  <p>No hay clases programadas para hoy</p>
+                </div>
+              ) : (
+                todayClasses.map(booking => (
+                  <AttendanceCard key={booking.id} booking={booking} />
+                ))
+              )}
+            </div>
+          </Section>
+
+          <Section 
+            title="Próximas clases" 
+            rightContent={<Badge variant="info">{upcomingBookings.length} reservas</Badge>}
+          >
+            <div className="space-y-3 max-h-96 overflow-y-auto">
+              {upcomingBookings.map(booking => (
+                <div key={booking.id} className="border rounded-xl p-3 flex items-center justify-between">
+                  <div>
+                    <div className="font-medium text-sm">{Utils.formatDate(Utils.parseLocalISO(booking.slotISO))}</div>
+                    <div className="text-xs text-gray-600">{booking.user?.name || booking.userEmail}</div>
+                  </div>
+                  <Badge variant="info">Reservado</Badge>
+                </div>
+              ))}
+            </div>
+          </Section>
+        </div>
+      );
+    };
+
+    // ===== Panel de Administrador =====
+    const AdminPanel = ({ users, bookings, onRefresh }) => {
+      const [email, setEmail] = useState("");
+      const [delta, setDelta] = useState(4);
+      const [fixAmount, setFixAmount] = useState("");
+
+      const futureBookings = useMemo(() => {
+        return Database.getFutureBookings()
+          .map(booking => ({
+            ...booking,
+            user: users.find(u => u.email === booking.userEmail)
+          }))
+          .sort((a, b) => Utils.parseLocalISO(a.slotISO) - Utils.parseLocalISO(b.slotISO));
+      }, [bookings, users]);
+
+      const handleAddSessions = async () => {
+        try {
+          const currentUser = Auth.getCurrentUser();
+          await BookingLogic.addSessions(email, delta, currentUser);
+          onRefresh();
+          alert("Sesiones agregadas correctamente");
+          setEmail("");
+        } catch (error) {
+          alert(error.message);
+        }
+      };
+
+      const handleSetSessions = async () => {
+        try {
+          const currentUser = Auth.getCurrentUser();
+          await BookingLogic.setSessions(email, fixAmount, currentUser);
+          onRefresh();
+          alert("Sesiones establecidas correctamente");
+          setEmail("");
+          setFixAmount("");
+        } catch (error) {
+          alert(error.message);
+        }
+      };
+
+      const handleMarkAttendance = async (bookingId, status) => {
+        try {
+          const currentUser = Auth.getCurrentUser();
+          await BookingLogic.markAttendance(bookingId, status, currentUser);
+          onRefresh();
+        } catch (error) {
+          alert(error.message);
+        }
+      };
+
+      const handleReschedule = async (booking, newSlotISO) => {
+        try {
+          const currentUser = Auth.getCurrentUser();
+          await BookingLogic.rescheduleBooking(booking.id, newSlotISO, currentUser);
+          onRefresh();
+        } catch (error) {
+          alert(error.message);
+        }
+      };
+
+      const handleCancel = async (booking) => {
+        try {
+          const currentUser = Auth.getCurrentUser();
+          await BookingLogic.cancelBooking(booking.id, currentUser);
+          onRefresh();
+        } catch (error) {
+          alert(error.message);
+        }
+      };
+
+      return (
+        <div className="space-y-6">
+          <Section title="Gestión de Paquetes">
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+              <h3 className="font-medium text-blue-800 mb-4">Asignar sesiones a usuarios</h3>
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="flex flex-col">
+                  <label className="text-xs text-gray-600 mb-1">Correo del usuario</label>
+                  <input
+                    className="border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="cliente@correo.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                  />
+                </div>
+                
+                <div className="flex flex-col">
+                  <label className="text-xs text-gray-600 mb-1">Agregar sesiones (+)</label>
+                  <input
+                    type="number"
+                    className="border border-gray-300 rounded-lg px-3 py-2 w-28 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    value={delta}
+                    onChange={(e) => setDelta(Number(e.target.value))}
+                  />
+                </div>
+                
+                <Button onClick={handleAddSessions} variant="primary">
+                  Agregar
+                </Button>
+                
+                <div className="text-sm text-gray-400">o</div>
+                
+                <div className="flex flex-col">
+                  <label className="text-xs text-gray-600 mb-1">Fijar total (=)</label>
+                  <input
+                    type="number"
+                    className="border border-gray-300 rounded-lg px-3 py-2 w-28 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    value={fixAmount}
+                    onChange={(e) => setFixAmount(e.target.value)}
+                  />
+                </div>
+                
+                <Button onClick={handleSetSessions} variant="success">
+                  Fijar
+                </Button>
+              </div>
+            </div>
+          </Section>
+
+          <Section 
+            title="Gestión de Reservas" 
+            rightContent={<Badge variant="info">{futureBookings.length} reservas futuras</Badge>}
+          >
+            <div className="space-y-3">
+              {futureBookings.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">
+                  <span className="text-3xl mb-2 block">📋</span>
+                  <p>No hay reservas futuras</p>
+                </div>
+              ) : (
+                futureBookings.map(booking => (
+                  <div key={booking.id} className="border-2 border-gray-200 rounded-xl p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-4">
+                      <div className="space-y-1">
+                        <div className="font-semibold">{Utils.formatDate(Utils.parseLocalISO(booking.slotISO))}</div>
+                        <div className="text-sm text-gray-600">{booking.user?.name || booking.userEmail}</div>
+                        <Badge variant={
+                          booking.status === "attended" ? "success" : 
+                          booking.status === "missed" ? "danger" : "info"
+                        }>
+                          {TEXTS.STATUS[booking.status]}
+                        </Badge>
+                      </div>
+                      
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button
+                          onClick={() => handleMarkAttendance(booking.id, "attended")}
+                          variant="success"
+                          size="small"
+                        >
+                          ✓ Asistió
+                        </Button>
+                        
+                        <Button
+                          onClick={() => handleMarkAttendance(booking.id, "missed")}
+                          variant="danger" 
+                          size="small"
+                        >
+                          ✗ Faltó
+                        </Button>
+                        
+                        <select
+                          className="border border-gray-300 rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          defaultValue=""
+                          onChange={(e) => {
+                            if (e.target.value) {
+                              handleReschedule(booking, e.target.value);
+                            }
+                          }}
+                        >
+                          <option value="">Reprogramar…</option>
+                          {Utils.generateSlots().map(slot => (
+                            <option key={slot} value={slot}>
+                              {Utils.formatDate(Utils.parseLocalISO(slot))}
+                            </option>
+                          ))}
+                        </select>
+                        
+                        <Button
+                          onClick={() => handleCancel(booking)}
+                          variant="secondary"
+                          size="small"
+                        >
+                          Cancelar
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </Section>
+
+          <Section 
+            title="Usuarios Registrados" 
+            rightContent={<Badge variant="info">{users.length} usuarios</Badge>}
+          >
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {users.map(user => (
+                <div key={user.email} className="border-2 border-gray-200 rounded-xl p-4 hover:shadow-md transition-all duration-200">
+                  <div className="space-y-2">
+                    <div className="font-semibold text-gray-800">{user.name || user.email}</div>
+                    <div className="text-xs text-gray-500">{user.email}</div>
+                    <div className="flex items-center justify-between">
+                      <Badge variant={
+                        user.role === 'admin' ? 'danger' : 
+                        user.role === 'instructor' ? 'warning' : 'info'
+                      }>
+                        {TEXTS.ROLES[user.role]}
+                      </Badge>
+                      <div className="text-sm">
+                        <span className="text-gray-600">Sesiones:</span>
+                        <span className="font-bold ml-1 text-blue-600">{user.sessions || 0}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Section>
+        </div>
+      );
+    };
+
+    // ===== Componente Principal de la App =====
+    function App() {
+      const { user, login, logout, refreshUser, loading } = useAuth();
+      const { bookings, users, slots, refreshData } = useAppData();
+      const [activeTab, setActiveTab] = useState("schedule");
+
+      // Actualizar datos cuando cambie el usuario
+      useEffect(() => {
+        if (user) {
+          refreshData();
+          // Establecer tab por defecto según el rol
+          const defaultTabs = {
+            user: "schedule",
+            instructor: "attendance", 
+            admin: "schedule"
+          };
+          setActiveTab(defaultTabs[user.role] || "schedule");
+        }
+      }, [user]);
+
+      const handleRefresh = () => {
+        refreshData();
+        refreshUser();
+      };
+
+      const handleBooking = async (slotISO) => {
+        try {
+          await BookingLogic.createBooking(user, slotISO);
+          handleRefresh();
+          alert("¡Reserva creada exitosamente!");
+        } catch (error) {
+          alert(error.message);
+        }
+      };
+
+      const handleCancel = async (booking) => {
+        try {
+          await BookingLogic.cancelBooking(booking.id, user);
+          handleRefresh();
+          alert("Reserva cancelada exitosamente");
+        } catch (error) {
+          alert(error.message);
+        }
+      };
+
+      const handleReschedule = async (booking, newSlotISO) => {
+        try {
+          await BookingLogic.rescheduleBooking(booking.id, newSlotISO, user);
+          handleRefresh();
+          alert("Reserva reprogramada exitosamente");
+        } catch (error) {
+          alert(error.message);
+        }
+      };
+
+      // Definir tabs disponibles según el rol
+      const getAvailableTabs = () => {
+        const tabs = [];
+        
+        if (user.role === 'user') {
+          tabs.push(
+            { id: "schedule", label: "Reservar Clases", icon: "📅" },
+            { id: "bookings", label: "Mis Reservas", icon: "📋" }
+          );
+        }
+        
+        if (user.role === 'instructor') {
+          tabs.push(
+            { id: "attendance", label: "Tomar Asistencia", icon: "✅" }
+          );
+        }
+        
+        if (user.role === 'admin') {
+          tabs.push(
+            { id: "schedule", label: "Reservar Clases", icon: "📅" },
+            { id: "bookings", label: "Mis Reservas", icon: "📋" },
+            { id: "attendance", label: "Tomar Asistencia", icon: "✅" },
+            { id: "admin", label: "Administración", icon: "⚙️" }
+          );
+        }
+        
+        return tabs;
+      };
+
+      if (loading) {
+        return (
+          <div className="min-h-screen flex items-center justify-center">
+            <LoadingSpinner size="large" />
+          </div>
+        );
+      }
+
+      if (!user) {
+        return <LoginPage onLogin={login} />;
+      }
+
+      const availableTabs = getAvailableTabs();
+
+      return (
+        <div className="min-h-screen p-4 sm:p-6 md:p-8 fade-in">
+          <div className="max-w-6xl mx-auto space-y-6">
+            {/* Header */}
+            <header className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <h1 className="text-3xl font-bold text-white mb-2">{TEXTS.LOGIN.TITLE}</h1>
+                <p className="text-white/80 text-sm">{TEXTS.LOGIN.SUBTITLE}</p>
+              </div>
+              <div className="flex items-center gap-4">
+                <div className="text-right">
+                  <div className="text-white font-medium">Hola, {user.name}</div>
+                  <div className="text-white/80 text-sm flex items-center gap-2">
+                    <Badge variant={
+                      user.role === 'admin' ? 'danger' : 
+                      user.role === 'instructor' ? 'warning' : 'info'
+                    }>
+                      {TEXTS.ROLES[user.role]}
+                    </Badge>
+                    {user.role === 'user' && (
+                      <span>
+                        <span className="font-mono">{user.sessions || 0}</span> sesiones
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <Button
+                  onClick={logout}
+                  variant="outline"
+                  className="bg-white/20 text-white border-white/30 hover:bg-white/30"
+                >
+                  Cerrar Sesión
+                </Button>
+              </div>
+            </header>
+
+            {/* Navigation */}
+            <nav className="flex flex-wrap items-center gap-2">
+              {availableTabs.map(tab => (
+                <button
+                  key={tab.id}
+                  className={`px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
+                    activeTab === tab.id 
+                      ? 'bg-white text-gray-800 shadow-lg transform scale-105' 
+                      : 'bg-white/20 text-white hover:bg-white/30'
+                  }`}
+                  onClick={() => setActiveTab(tab.id)}
+                >
+                  <span className="mr-2">{tab.icon}</span>
+                  {tab.label}
+                </button>
+              ))}
+            </nav>
+
+            {/* Content */}
+            <div className="space-y-6">
+              {activeTab === "schedule" && (
+                <Section 
+                  title="Calendario de Clases" 
+                  rightContent={<Badge variant="info">Capacidad {CONFIG.CAPACITY} por clase</Badge>}
+                >
+                  {user.role === 'user' && user.sessions <= 0 && (
+                    <div className="mb-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3">
+                      ⚠️ No tienes sesiones disponibles. Contacta al administrador para adquirir un paquete.
+                    </div>
+                  )}
+                  <SlotsGrid 
+                    slots={slots} 
+                    bookings={bookings} 
+                    onBook={handleBooking} 
+                    currentUser={user} 
+                  />
+                </Section>
+              )}
+
+              {activeTab === "bookings" && (
+                <Section title="Tus Reservas">
+                  <BookingsList 
+                    user={user} 
+                    bookings={bookings} 
+                    allSlots={slots}
+                    onCancel={handleCancel} 
+                    onReschedule={handleReschedule} 
+                  />
+                </Section>
+              )}
+
+              {activeTab === "attendance" && (user.role === 'instructor' || user.role === 'admin') && (
+                <InstructorPanel 
+                  bookings={bookings} 
+                  users={users} 
+                  onRefresh={handleRefresh} 
+                />
+              )}
+
+              {activeTab === "admin" && user.role === 'admin' && (
+                <AdminPanel 
+                  users={users} 
+                  bookings={bookings} 
+                  onRefresh={handleRefresh} 
+                />
+              )}
+            </div>
+
+            {/* Footer */}
+            <footer className="text-xs text-white/60 pt-6 text-center">
+              <p>Demo del sistema de reservas • Para producción se requiere backend con base de datos y notificaciones por email</p>
+            </footer>
+          </div>
+        </div>
+      );
+    }
+
+    // ===== Inicializar la aplicación =====
+    const container = document.getElementById('root');
+    const root = ReactDOM.createRoot(container);
+    root.render(<App />);
+  </script>
 </body>
 </html>
