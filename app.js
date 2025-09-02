@@ -285,7 +285,242 @@ const AdminPanel = ({ users, bookings, onRefresh }) => {
           ) : (
             futureBookings.map(booking => (
               <div key={booking.id} className="border-2 border-gray-200 rounded-xl p-4">
-                <div className="flex flex-wrap items-center justify-between gap-4">
+                <div className="flex items-center justify-between">
+                  <Badge variant={
+                    user.role === 'admin' ? 'danger' : 
+                    user.role === 'instructor' ? 'warning' : 'info'
+                  }>
+                    {TEXTS.ROLES[user.role]}
+                  </Badge>
+                  <div className="text-sm">
+                    <span className="text-gray-600">Sesiones:</span>
+                    <span className="font-bold ml-1 text-blue-600">{user.sessions || 0}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Section>
+    </div>
+  );
+};
+
+// ===== Componente Principal de la App =====
+function App() {
+  const { user, login, logout, refreshUser, loading } = useAuth();
+  const { bookings, users, slots, refreshData } = useAppData();
+  const [activeTab, setActiveTab] = useState("schedule");
+
+  // Actualizar datos cuando cambie el usuario
+  useEffect(() => {
+    if (user) {
+      refreshData();
+      // Establecer tab por defecto según el rol
+      const defaultTabs = {
+        user: "schedule",
+        instructor: "attendance", 
+        admin: "schedule"
+      };
+      setActiveTab(defaultTabs[user.role] || "schedule");
+    }
+  }, [user]);
+
+  const handleRefresh = () => {
+    refreshData();
+    refreshUser();
+  };
+
+  const handleBooking = async (slotISO) => {
+    try {
+      await BookingLogic.createBooking(user, slotISO);
+      handleRefresh();
+      alert("¡Reserva creada exitosamente!");
+    } catch (error) {
+      alert(error.message);
+    }
+  };
+
+  const handleCancel = async (booking) => {
+    try {
+      await BookingLogic.cancelBooking(booking.id, user);
+      handleRefresh();
+      alert("Reserva cancelada exitosamente");
+    } catch (error) {
+      alert(error.message);
+    }
+  };
+
+  const handleReschedule = async (booking, newSlotISO) => {
+    try {
+      await BookingLogic.rescheduleBooking(booking.id, newSlotISO, user);
+      handleRefresh();
+      alert("Reserva reprogramada exitosamente");
+    } catch (error) {
+      alert(error.message);
+    }
+  };
+
+  // Definir tabs disponibles según el rol
+  const getAvailableTabs = () => {
+    const tabs = [];
+    
+    if (user.role === 'user') {
+      tabs.push(
+        { id: "schedule", label: "Reservar Clases", icon: "📅" },
+        { id: "bookings", label: "Mis Reservas", icon: "📋" }
+      );
+    }
+    
+    if (user.role === 'instructor') {
+      tabs.push(
+        { id: "attendance", label: "Tomar Asistencia", icon: "✅" }
+      );
+    }
+    
+    if (user.role === 'admin') {
+      tabs.push(
+        { id: "schedule", label: "Reservar Clases", icon: "📅" },
+        { id: "bookings", label: "Mis Reservas", icon: "📋" },
+        { id: "attendance", label: "Tomar Asistencia", icon: "✅" },
+        { id: "admin", label: "Administración", icon: "⚙️" }
+      );
+    }
+    
+    return tabs;
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <LoadingSpinner size="large" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <LoginPage onLogin={login} />;
+  }
+
+  const availableTabs = getAvailableTabs();
+
+  return (
+    <div className="min-h-screen p-4 sm:p-6 md:p-8 fade-in">
+      <div className="max-w-6xl mx-auto space-y-6">
+        {/* Header */}
+        <header className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold text-white mb-2">{TEXTS.LOGIN.TITLE}</h1>
+            <p className="text-white/80 text-sm">{TEXTS.LOGIN.SUBTITLE}</p>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="text-right">
+              <div className="text-white font-medium">Hola, {user.name}</div>
+              <div className="text-white/80 text-sm flex items-center gap-2">
+                <Badge variant={
+                  user.role === 'admin' ? 'danger' : 
+                  user.role === 'instructor' ? 'warning' : 'info'
+                }>
+                  {TEXTS.ROLES[user.role]}
+                </Badge>
+                {user.role === 'user' && (
+                  <span>
+                    <span className="font-mono">{user.sessions || 0}</span> sesiones
+                  </span>
+                )}
+              </div>
+            </div>
+            <Button
+              onClick={logout}
+              variant="outline"
+              className="bg-white/20 text-white border-white/30 hover:bg-white/30"
+            >
+              Cerrar Sesión
+            </Button>
+          </div>
+        </header>
+
+        {/* Navigation */}
+        <nav className="flex flex-wrap items-center gap-2">
+          {availableTabs.map(tab => (
+            <button
+              key={tab.id}
+              className={`px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
+                activeTab === tab.id 
+                  ? 'bg-white text-gray-800 shadow-lg transform scale-105' 
+                  : 'bg-white/20 text-white hover:bg-white/30'
+              }`}
+              onClick={() => setActiveTab(tab.id)}
+            >
+              <span className="mr-2">{tab.icon}</span>
+              {tab.label}
+            </button>
+          ))}
+        </nav>
+
+        {/* Content */}
+        <div className="space-y-6">
+          {activeTab === "schedule" && (
+            <Section 
+              title="Calendario de Clases" 
+              rightContent={<Badge variant="info">Capacidad {CONFIG.CAPACITY} por clase</Badge>}
+            >
+              {user.role === 'user' && user.sessions <= 0 && (
+                <div className="mb-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3">
+                  ⚠️ No tienes sesiones disponibles. Contacta al administrador para adquirir un paquete.
+                </div>
+              )}
+              <SlotsGrid 
+                slots={slots} 
+                bookings={bookings} 
+                onBook={handleBooking} 
+                currentUser={user} 
+              />
+            </Section>
+          )}
+
+          {activeTab === "bookings" && (
+            <Section title="Tus Reservas">
+              <BookingsList 
+                user={user} 
+                bookings={bookings} 
+                allSlots={slots}
+                onCancel={handleCancel} 
+                onReschedule={handleReschedule} 
+              />
+            </Section>
+          )}
+
+          {activeTab === "attendance" && (user.role === 'instructor' || user.role === 'admin') && (
+            <InstructorPanel 
+              bookings={bookings} 
+              users={users} 
+              onRefresh={handleRefresh} 
+            />
+          )}
+
+          {activeTab === "admin" && user.role === 'admin' && (
+            <AdminPanel 
+              users={users} 
+              bookings={bookings} 
+              onRefresh={handleRefresh} 
+            />
+          )}
+        </div>
+
+        {/* Footer */}
+        <footer className="text-xs text-white/60 pt-6 text-center">
+          <p>Demo del sistema de reservas • Para producción se requiere backend con base de datos y notificaciones por email</p>
+        </footer>
+      </div>
+    </div>
+  );
+}
+
+// ===== Inicializar la aplicación =====
+const container = document.getElementById('root');
+const root = ReactDOM.createRoot(container);
+root.render(<App />); flex-wrap items-center justify-between gap-4">
                   <div className="space-y-1">
                     <div className="font-semibold">{Utils.formatDate(Utils.parseLocalISO(booking.slotISO))}</div>
                     <div className="text-sm text-gray-600">{booking.user?.name || booking.userEmail}</div>
